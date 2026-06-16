@@ -1,19 +1,354 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>山东财经大学阳光跑</title>
+<title>TERMINAL // ACCESS</title>
 <style>
-  * { margin: 0; padding: 0; }
-  body { background: #000; }
-  img {
-    width: 100%;
-    display: block;
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    overflow-x: hidden;
+    font-family: 'Courier New', 'Source Code Pro', 'Fira Code', monospace;
+    height: 100vh;
+    width: 100vw;
+    cursor: crosshair;
   }
+  canvas { position: fixed; top: 0; left: 0; z-index: 0; }
+
+  .scanlines {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px
+    );
+  }
+  .vignette {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 9;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.7) 100%);
+  }
+
+  .terminal {
+    position: relative; z-index: 20;
+    max-width: 900px;
+    margin: 4vh auto 0;
+    padding: 25px 35px;
+    color: #0f0;
+    text-shadow: 0 0 5px #0f0;
+    min-height: 85vh;
+    overflow-y: auto;
+  }
+  .term-header {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(0,255,0,0.3);
+    font-size: 13px;
+    color: #0a0;
+    letter-spacing: 1px;
+  }
+  .term-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .term-dot.red { background: #ff5f56; box-shadow: 0 0 6px #ff5f56; }
+  .term-dot.yellow { background: #ffbd2e; box-shadow: 0 0 6px #ffbd2e; }
+  .term-dot.green { background: #27c93f; box-shadow: 0 0 6px #27c93f; }
+  .term-title { flex: 1; text-align: center; opacity: 0.7; }
+
+  .output {
+    font-size: 14px;
+    line-height: 1.75;
+    white-space: pre-wrap;
+    margin-bottom: 10px;
+  }
+  .line { opacity: 0; animation: fadeIn 0.12s forwards; max-width: 100%; }
+  @keyframes fadeIn { to { opacity: 1; } }
+
+  .dim { color: #0a0; }
+  .warn { color: #ff0; text-shadow: 0 0 5px #ff0; }
+  .err  { color: #f00; text-shadow: 0 0 5px #f00; }
+  .info { color: #0ff; text-shadow: 0 0 5px #0ff; }
+  .success { color: #0f0; text-shadow: 0 0 8px #0f0; }
+  .highlight { color: #fff; text-shadow: 0 0 8px #fff; }
+
+  .prompt-line {
+    margin-top: 15px; font-size: 14px; color: #0f0; display: none; align-items: center; gap: 0;
+  }
+  .prompt-line.show { display: flex; }
+  #userInput {
+    background: transparent; border: none; color: #0f0;
+    font-family: inherit; font-size: 14px; outline: none;
+    caret-color: #0f0; flex: 1; text-shadow: 0 0 5px #0f0;
+  }
+  #userInput::placeholder { color: #050; }
+
+  .glitch-text {
+    font-size: 20px; font-weight: bold; letter-spacing: 4px;
+    text-align: center; margin: 15px 0; display: none;
+  }
+  .glitch-text.show {
+    display: block;
+    animation: glitch 0.3s linear 3;
+  }
+  @keyframes glitch {
+    0% { transform: translate(0); }
+    20% { transform: translate(-3px, 2px); }
+    40% { transform: translate(3px, -2px); }
+    60% { transform: translate(-2px, -2px); }
+    80% { transform: translate(2px, 1px); }
+    100% { transform: translate(0); }
+  }
+
+  /* scrollbar */
+  .terminal::-webkit-scrollbar { width: 6px; }
+  .terminal::-webkit-scrollbar-track { background: #000; }
+  .terminal::-webkit-scrollbar-thumb { background: #0f0; border-radius: 3px; }
 </style>
 </head>
 <body>
-  <img src="screenshot.jpg" alt="screenshot">
+
+<canvas id="matrix"></canvas>
+<div class="scanlines"></div>
+<div class="vignette"></div>
+
+<div class="terminal" id="terminal">
+  <div class="term-header">
+    <span class="term-dot red"></span>
+    <span class="term-dot yellow"></span>
+    <span class="term-dot green"></span>
+    <span class="term-title">root@nexus:~# tty1</span>
+  </div>
+  <div class="output" id="output"></div>
+  <div class="glitch-text" id="glitchText">⬡ ACCESS GRANTED ⬡</div>
+  <div class="prompt-line" id="promptLine">
+    <span style="color:#0ff;">root</span><span>@</span><span style="color:#f0f;">nexus</span><span>:</span><span style="color:#0ff;">~</span><span>#&nbsp;</span>
+    <input type="text" id="userInput" placeholder="type help..." autofocus>
+  </div>
+</div>
+
+<script>
+// ========== MATRIX RAIN ==========
+const canvas = document.getElementById('matrix');
+const ctx = canvas.getContext('2d');
+let w, h;
+function resize() { w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
+const fontSize = 16;
+const cols = Math.floor(w / fontSize);
+const drops = Array(cols).fill(0);
+
+setInterval(() => {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.font = fontSize + 'px monospace';
+  for (let i = 0; i < drops.length; i++) {
+    const ch = chars[Math.floor(Math.random() * chars.length)];
+    const x = i * fontSize;
+    const y = drops[i] * fontSize;
+    ctx.fillStyle = '#fff';
+    ctx.fillText(ch, x, y);
+    for (let j = 1; j < 8; j++) {
+      ctx.fillStyle = `rgba(0, 255, 0, ${1 - j * 0.12})`;
+      ctx.fillText(chars[Math.floor(Math.random() * chars.length)], x, y - j * fontSize);
+    }
+    if (drops[i] * fontSize > h && Math.random() > 0.975) drops[i] = 0;
+    drops[i]++;
+  }
+}, 50);
+
+// ========== TERMINAL ==========
+const output = document.getElementById('output');
+const glitchText = document.getElementById('glitchText');
+const promptLine = document.getElementById('promptLine');
+const userInput = document.getElementById('userInput');
+
+function typeLine(text, cls = '', delay = 30) {
+  return new Promise(resolve => {
+    const el = document.createElement('div');
+    el.className = 'line ' + cls;
+    output.appendChild(el);
+    if (!text) { resolve(); return; }
+    let i = 0;
+    const iv = setInterval(() => {
+      el.textContent += text[i];
+      i++;
+      if (i >= text.length) { clearInterval(iv); resolve(); }
+    }, delay);
+  });
+}
+
+function printLine(text, cls = '') {
+  const el = document.createElement('div');
+  el.className = 'line ' + cls;
+  el.textContent = text;
+  output.appendChild(el);
+}
+
+async function boot() {
+  await typeLine('');
+  await typeLine('[BOOT] Initializing secure shell...', 'dim', 6);
+  await typeLine('[BOOT] Loading kernel modules...................... OK', 'dim', 3);
+  await typeLine('[BOOT] Mounting encrypted volumes.................. OK', 'dim', 3);
+  await typeLine('[BOOT] Establishing secure handshake.............. OK', 'dim', 3);
+  await new Promise(r => setTimeout(r, 300));
+
+  await typeLine('');
+  await typeLine('█████████████████████████████████████████████████████████', 'dim', 2);
+  await typeLine('█                                                       █', 'dim', 2);
+  await typeLine('█     N E X U S   T E R M I N A L   v4.2.1              █', 'success', 6);
+  await typeLine('█     Secure channel • AES-256 • Tunnel active           █', 'dim', 2);
+  await typeLine('█                                                       █', 'dim', 2);
+  await typeLine('█████████████████████████████████████████████████████████', 'dim', 2);
+  await typeLine('');
+  await new Promise(r => setTimeout(r, 400));
+
+  await typeLine('[*] Establishing proxy chain...', 'dim', 12);
+  await new Promise(r => setTimeout(r, 200));
+  printLine('[+] Node 1: 192.168.1.1       ▸  Stockholm, SE    ▸ 23ms', 'dim');
+  await new Promise(r => setTimeout(r, 120));
+  printLine('[+] Node 2: 10.8.0.1          ▸  Zurich, CH       ▸ 47ms', 'dim');
+  await new Promise(r => setTimeout(r, 120));
+  printLine('[+] Node 3: 172.16.0.1        ▸  Reykjavik, IS    ▸ 89ms', 'dim');
+  await new Promise(r => setTimeout(r, 120));
+  printLine('[+] Node 4: 192.168.99.1      ▸  Hong Kong, HK    ▸ 156ms', 'dim');
+  await new Promise(r => setTimeout(r, 200));
+  await typeLine('[*] Chain established • Latency: 156ms', 'info', 12);
+  await new Promise(r => setTimeout(r, 400));
+
+  await typeLine('[*] Scanning ingress points...', 'dim', 12);
+  await new Promise(r => setTimeout(r, 350));
+  printLine('[!] Port 22   ▸ ssh       ▸ filtered', 'warn');
+  printLine('[!] Port 443  ▸ https     ▸ filtered', 'warn');
+  printLine('[+] Port 8080 ▸ nginx/1.18 ▸ open', 'info');
+  printLine('[+] Port 3306 ▸ MySQL 8.0 ▸ open', 'info');
+  printLine('[+] Port 27017▸ MongoDB   ▸ open', 'info');
+  await new Promise(r => setTimeout(r, 300));
+
+  await typeLine('[*] Loading exploit: CVE-2024-1337...', 'dim', 18);
+  await new Promise(r => setTimeout(r, 500));
+  printLine('[+] Payload delivered', 'info');
+  await new Promise(r => setTimeout(r, 250));
+  printLine('[+] Reverse shell spawned', 'info');
+  await new Promise(r => setTimeout(r, 200));
+  printLine('[+] PrivEsc: uid=0(root) gid=0(root)', 'success');
+  await new Promise(r => setTimeout(r, 500));
+
+  glitchText.classList.add('show');
+  await new Promise(r => setTimeout(r, 1500));
+  glitchText.classList.remove('show');
+  await new Promise(r => setTimeout(r, 400));
+
+  await typeLine('');
+  await typeLine('[√] Session authenticated.', 'success', 12);
+  await typeLine('[i] Type "help" for available commands.', 'dim', 12);
+  await typeLine('');
+  await new Promise(r => setTimeout(r, 300));
+
+  promptLine.classList.add('show');
+  userInput.focus();
+}
+
+// ========== COMMANDS ==========
+const cmds = {
+  help: () => {
+    printLine('');
+    printLine('  ╔═══════════════════════════════╗', 'highlight');
+    printLine('  ║    AVAILABLE COMMANDS        ║', 'highlight');
+    printLine('  ╠═══════════════════════════════╣', 'dim');
+    printLine('  ║ help      ▸ Show this menu   ║', 'info');
+    printLine('  ║ whoami    ▸ User identity    ║', 'info');
+    printLine('  ║ scan      ▸ Network scan     ║', 'info');
+    printLine('  ║ sysinfo   ▸ System specs     ║', 'info');
+    printLine('  ║ trace     ▸ Trace route      ║', 'info');
+    printLine('  ║ decrypt   ▸ Decrypt payload  ║', 'info');
+    printLine('  ║ exfil     ▸ Exfiltrate data  ║', 'info');
+    printLine('  ║ clear     ▸ Clear screen     ║', 'info');
+    printLine('  ║ exit      ▸ Terminate        ║', 'info');
+    printLine('  ╚═══════════════════════════════╝', 'dim');
+    printLine('');
+  },
+  whoami: () => {
+    printLine('  uid=0(root) gid=0(root) groups=0(root)', 'success');
+    printLine('  session=7f3a8b2c  •  host=nexus-node-04', 'dim');
+    printLine('  auth=publickey  •  cipher=aes256-gcm@openssh.com', 'dim');
+  },
+  scan: () => {
+    printLine('  [*] Scanning subnet 192.168.1.0/24...', 'dim');
+    setTimeout(() => {
+      printLine('  192.168.1.1    ▸ Gateway/Router        ▸ 22,80,443', 'warn');
+      printLine('  192.168.1.12   ▸ NAS-Storage-01        ▸ 445,139', 'warn');
+      printLine('  192.168.1.37   ▸ Workstation-7         ▸ 3389,5985', 'info');
+      printLine('  192.168.1.88   ▸ IOT-Camera-02         ▸ 554,8080', 'info');
+      printLine('  192.168.1.104  ▸ Admin-Laptop          ▸ 22,5900', 'success');
+      printLine('  [√] 5 hosts discovered.', 'success');
+    }, 600);
+  },
+  sysinfo: () => {
+    printLine('  OS       ▸ Kali GNU/Linux 2024.1 (6.6.9)', 'info');
+    printLine('  CPU      ▸ Intel i9-14900K @ 6.0GHz  24 cores', 'info');
+    printLine('  RAM      ▸ 64GB DDR5 @ 6400MHz', 'info');
+    printLine('  GPU      ▸ NVIDIA RTX 4090 • 24GB GDDR6X', 'info');
+    printLine('  NET      ▸ 10Gbps Fiber • Uptime 143d 7h', 'info');
+    printLine('  CIPHER   ▸ AES-256-GCM • ECDHE Forward Secrecy', 'success');
+  },
+  trace: () => {
+    printLine('  traceroute to 203.0.113.42, 30 hops max...', 'dim');
+    [
+      [' 1  192.168.1.1       1ms','dim'], [' 2  10.23.45.1       12ms','dim'],
+      [' 3  72.14.237.89      34ms   Stockholm, SE','dim'], [' 4  108.170.248.1     51ms   Frankfurt, DE','dim'],
+      [' 5  142.250.185.68    98ms   Singapore, SG','dim'], [' 6  203.0.113.42     134ms   TARGET REACHED','success'],
+    ].forEach(([t,c], i) => setTimeout(() => printLine(t,c), i * 110));
+  },
+  decrypt: () => {
+    printLine('  [*] Decrypting payload.bin (4.2 GB)...', 'dim');
+    setTimeout(() => printLine('  [25%]  ████████░░░░░░░░░░░░░░░░░░░░', 'dim'), 300);
+    setTimeout(() => printLine('  [50%]  ████████████████░░░░░░░░░░░░░', 'dim'), 600);
+    setTimeout(() => printLine('  [75%]  ████████████████████████░░░░░', 'dim'), 900);
+    setTimeout(() => {
+      printLine('  [100%] Decryption complete.', 'success');
+      printLine('  SHA-256: a1b2c3d4e5f6... • Signature: VALID', 'info');
+    }, 1300);
+  },
+  exfil: () => {
+    printLine('  [*] Establishing covert channel...', 'dim');
+    setTimeout(() => {
+      printLine('  Exfiltrating: /etc/shadow........... DONE', 'dim');
+      printLine('  Exfiltrating: database.dump......... DONE', 'dim');
+      printLine('  Exfiltrating: keychain.kdbx......... DONE', 'info');
+      printLine('  Packets: 847,291 • Errors: 0 • Chaff: 73%', 'success');
+    }, 500);
+  },
+  clear: () => { output.innerHTML = ''; },
+  exit: () => {
+    printLine('  [!] Connection terminated.', 'err');
+    printLine('  [!] Session logs purged.', 'err');
+    printLine('  [!] Goodbye.', 'err');
+    setTimeout(() => {
+      document.querySelector('.terminal').style.opacity = '0';
+      document.querySelector('.terminal').style.transition = 'opacity 0.5s';
+    }, 600);
+  },
+};
+
+userInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const cmd = userInput.value.trim().toLowerCase();
+    const cmdEl = document.createElement('div');
+    cmdEl.className = 'line';
+    cmdEl.innerHTML = '<span style="color:#0ff;">root</span>@<span style="color:#f0f;">nexus</span>:<span style="color:#0ff;">~</span># ' + userInput.value;
+    output.appendChild(cmdEl);
+    userInput.value = '';
+    if (cmds[cmd]) cmds[cmd]();
+    else if (cmd) printLine('  bash: ' + cmd + ': command not found', 'err');
+    output.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+});
+
+document.addEventListener('click', () => userInput.focus());
+boot();
+</script>
 </body>
 </html>
